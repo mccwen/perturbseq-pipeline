@@ -1,0 +1,26 @@
+name: perturbseq-pipeline
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - scipy
+  - pyyaml
+  - matplotlib
+  - seaborn
+  - anndata
+  - scanpy
+  - scrublet
+  - harmonypy
+  - snakemake
+  - r-base
+  - r-essentials
+  - bioconductor-edger
+  - bioconductor-limma
+  - r-seurat
+  - r-mixscape
+  - pytest
+  - ruff
+

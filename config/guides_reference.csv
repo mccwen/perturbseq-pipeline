@@ -1,0 +1,7 @@
+guide_id,target_gene,is_non_targeting,expected_effect
+NT_001,NT,true,negative_control
+NT_002,NT,true,negative_control
+TP53_g1,TP53,false,tumor_suppressor
+KRAS_g1,KRAS,false,oncogene
+MYC_g1,MYC,false,oncogene
+

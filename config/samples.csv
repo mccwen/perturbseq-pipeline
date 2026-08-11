@@ -1,0 +1,4 @@
+sample_id,donor,batch,condition,cellranger_matrix,guide_matrix
+demo_A,D01,B1,vehicle,data/demo/expression_counts.csv,data/demo/guide_counts.csv
+demo_B,D02,B1,stimulated,data/demo/expression_counts.csv,data/demo/guide_counts.csv
+

@@ -1,0 +1,25 @@
+configfile: "config/config.yaml"
+
+include: "rules/01_qc.smk"
+include: "rules/02_guides.smk"
+include: "rules/03_batch.smk"
+include: "rules/03_mixscape.smk"
+include: "rules/04_pseudobulk.smk"
+include: "rules/05_de.smk"
+include: "rules/06_visualization.smk"
+
+rule all:
+    input:
+        "data/processed/01_qc/qc_metrics.csv",
+        "data/processed/01_qc/qc_plots.pdf",
+        "data/processed/02_guides/guide_assignments.csv",
+        "data/processed/02_guides/guide_qc_summary.csv",
+        "data/processed/03_batch/batch_metrics.csv",
+        "data/processed/03_batch/batch_recommendations.md",
+        "data/processed/03_mixscape/mixscape_scores.csv",
+        "data/processed/04_pseudobulk/pseudobulk_counts.csv",
+        "data/processed/04_pseudobulk/design_matrix.csv",
+        "data/processed/05_de/de_results.csv",
+        "data/processed/06_visualization/pathway_results.csv",
+        "results/final_reports/summary_dashboard.html"
+

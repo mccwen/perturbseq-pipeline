@@ -1,0 +1,11 @@
+executor: slurm
+jobs: 50
+latency-wait: 60
+default-resources:
+  slurm_partition: "normal"
+  mem_mb: 16000
+  runtime: 120
+  cpus_per_task: 4
+restart-times: 1
+printshellcmds: true
+
