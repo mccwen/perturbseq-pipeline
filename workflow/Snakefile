@@ -1,25 +1,366 @@
-configfile: "config/config.yaml"
+configfile: "config/analysis.yaml"
 
-include: "rules/01_qc.smk"
-include: "rules/02_guides.smk"
-include: "rules/03_batch.smk"
-include: "rules/03_mixscape.smk"
-include: "rules/04_pseudobulk.smk"
-include: "rules/05_de.smk"
-include: "rules/06_visualization.smk"
+from pathlib import Path
+
+import yaml
+
+from perturbseq_pipeline.inputs import configured_input_paths
+
+
+ANALYSIS_CONFIG = Path("config/analysis.yaml").resolve()
+PROJECT_ROOT = Path.cwd().resolve()
+
+
+def project_path(path):
+    """Keep workflow-generated configuration paths repository-relative."""
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+INPUT_CONFIG = next(
+    (
+        project_path(path)
+        for path in workflow.configfiles
+        if Path(path).resolve() != ANALYSIS_CONFIG
+    ),
+    None,
+)
+if not INPUT_CONFIG or "input" not in config:
+    raise ValueError(
+        "Select an input configuration with --configfile config/demo_h5ad.yaml "
+        "or config/demo_csv.yaml"
+    )
+
+RESOLVED_CONFIG = "data/processed/00_input/resolved_config.yaml"
+CONFIG_SOURCES = ["config/analysis.yaml", INPUT_CONFIG]
+
+
+def configured_input_files(wildcards):
+    return [str(path) for path in configured_input_paths(config)]
+
+
+def configured_provenance_files(wildcards):
+    return configured_input_files(wildcards) + [
+        config["guide_assignment"]["reference"],
+        config["pathway_analysis"]["gene_sets"],
+        "environment.yml",
+    ]
+
+
+rule resolve_config:
+    input:
+        CONFIG_SOURCES
+    output:
+        RESOLVED_CONFIG
+    run:
+        destination = Path(output[0])
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        resolved = dict(config)
+        resolved["input_config"] = INPUT_CONFIG
+        destination.write_text(yaml.safe_dump(resolved, sort_keys=False))
 
 rule all:
+    default_target: True
     input:
+        "data/processed/00_input/analysis.h5ad",
         "data/processed/01_qc/qc_metrics.csv",
         "data/processed/01_qc/qc_plots.pdf",
         "data/processed/02_guides/guide_assignments.csv",
         "data/processed/02_guides/guide_qc_summary.csv",
+        "data/processed/02_guides/low_moi_qc_summary.csv",
         "data/processed/03_batch/batch_metrics.csv",
         "data/processed/03_batch/batch_recommendations.md",
+        "data/processed/03_batch/batch_plots.pdf",
+        "data/processed/03_batch/guide_capture_by_sample.csv",
+        "data/processed/03_batch/guide_batch_tests.csv",
+        "data/processed/03_batch/guide_composition_by_batch.csv",
+        "data/processed/03_batch/guide_batch_plots.pdf",
         "data/processed/03_mixscape/mixscape_scores.csv",
+        "data/processed/03_mixscape/mixscape_plots.pdf",
+        "data/processed/03_design_gate/confounding_diagnostics.csv",
+        "data/processed/03_design_gate/decision.json",
         "data/processed/04_pseudobulk/pseudobulk_counts.csv",
         "data/processed/04_pseudobulk/design_matrix.csv",
+        "data/processed/04_pseudobulk/ko_only_counts.csv",
+        "data/processed/04_pseudobulk/ko_only_design_matrix.csv",
         "data/processed/05_de/de_results.csv",
+        "data/processed/05_de/contrast_summary.csv",
+        "data/processed/05_de/ko_only_de_results.csv",
+        "data/processed/05_de/ko_only_contrast_summary.csv",
         "data/processed/06_visualization/pathway_results.csv",
+        "results/provenance/run_metadata.json",
         "results/final_reports/summary_dashboard.html"
 
+
+rule prepare_inputs:
+    input:
+        config=RESOLVED_CONFIG,
+        sources=configured_input_files
+    output:
+        adata="data/processed/00_input/analysis.h5ad",
+        matrix="data/processed/00_input/expression.mtx",
+        genes="data/processed/00_input/genes.tsv",
+        barcodes="data/processed/00_input/barcodes.tsv",
+        metadata="data/processed/00_input/cell_metadata.csv"
+    shell:
+        "python -m perturbseq_pipeline prepare-inputs "
+        "--config {input.config} --adata-out {output.adata} --matrix-out {output.matrix} "
+        "--genes-out {output.genes} --barcodes-out {output.barcodes} "
+        "--metadata-out {output.metadata}"
+
+
+rule qc:
+    input:
+        adata="data/processed/00_input/analysis.h5ad",
+        config=RESOLVED_CONFIG
+    output:
+        metrics="data/processed/01_qc/qc_metrics.csv",
+        plots="data/processed/01_qc/qc_plots.pdf"
+    shell:
+        "python -m perturbseq_pipeline qc --config {input.config} --adata {input.adata} "
+        "--metrics {output.metrics} --plots {output.plots}"
+
+
+rule guide_calling:
+    input:
+        adata="data/processed/00_input/analysis.h5ad",
+        guide_reference=config["guide_assignment"]["reference"],
+        config=RESOLVED_CONFIG
+    output:
+        assignments="data/processed/02_guides/guide_assignments.csv",
+        summary="data/processed/02_guides/guide_qc_summary.csv",
+        low_moi_summary="data/processed/02_guides/low_moi_qc_summary.csv"
+    shell:
+        "python -m perturbseq_pipeline guides --config {input.config} "
+        "--adata {input.adata} --guide-reference {input.guide_reference} "
+        "--assignments {output.assignments} --summary {output.summary} "
+        "--low-moi-summary {output.low_moi_summary}"
+
+
+rule merge_metadata:
+    input:
+        metadata="data/processed/00_input/cell_metadata.csv",
+        assignments="data/processed/02_guides/guide_assignments.csv",
+        qc="data/processed/01_qc/qc_metrics.csv"
+    output:
+        merged="data/processed/03_batch/cell_metadata_with_guides.csv"
+    run:
+        import pandas as pd
+
+        meta = pd.read_csv(input.metadata)
+        guides = pd.read_csv(input.assignments)
+        qc_metrics = pd.read_csv(input.qc)
+        merged = meta.merge(guides, on="cell_barcode", how="left").merge(
+            qc_metrics, on="cell_barcode", how="left"
+        )
+        guide_eligible = merged["guide_assignment"].eq(
+            config["experiment"]["primary_analysis_guide_class"]
+        )
+        if not config["experiment"]["include_non_targeting_controls"]:
+            guide_eligible &= ~merged["is_non_targeting"].fillna(False)
+        merged["include_primary_analysis"] = (
+            guide_eligible
+            & merged["pass_qc"].fillna(False)
+            & ~merged["predicted_doublet"].fillna(True)
+        )
+        merged["analysis_exclusion_reason"] = ""
+        merged.loc[~guide_eligible, "analysis_exclusion_reason"] = "not_single_guide"
+        merged.loc[~merged["pass_qc"].fillna(False), "analysis_exclusion_reason"] = "cell_qc"
+        merged.loc[
+            merged["predicted_doublet"].fillna(True), "analysis_exclusion_reason"
+        ] = "transcriptomic_doublet"
+        merged.to_csv(output.merged, index=False)
+
+
+rule batch_diagnosis:
+    input:
+        adata="data/processed/00_input/analysis.h5ad",
+        metadata="data/processed/03_batch/cell_metadata_with_guides.csv",
+        config=RESOLVED_CONFIG
+    output:
+        metrics="data/processed/03_batch/batch_metrics.csv",
+        recommendations="data/processed/03_batch/batch_recommendations.md",
+        plots="data/processed/03_batch/batch_plots.pdf"
+    shell:
+        "python -m perturbseq_pipeline batch --config {input.config} --adata {input.adata} "
+        "--metadata {input.metadata} --metrics {output.metrics} "
+        "--recommendations {output.recommendations} --plots {output.plots}"
+
+
+rule guide_batch_diagnosis:
+    input:
+        assignments="data/processed/02_guides/guide_assignments.csv",
+        metadata="data/processed/00_input/cell_metadata.csv",
+        config=RESOLVED_CONFIG
+    output:
+        by_sample="data/processed/03_batch/guide_capture_by_sample.csv",
+        tests="data/processed/03_batch/guide_batch_tests.csv",
+        composition="data/processed/03_batch/guide_composition_by_batch.csv",
+        plots="data/processed/03_batch/guide_batch_plots.pdf"
+    shell:
+        "python -m perturbseq_pipeline guide-batch --config {input.config} "
+        "--assignments {input.assignments} --metadata {input.metadata} "
+        "--by-sample {output.by_sample} --tests {output.tests} "
+        "--composition {output.composition} --plots {output.plots}"
+
+
+rule mixscape_diagnosis:
+    input:
+        counts="data/processed/00_input/expression.mtx",
+        genes="data/processed/00_input/genes.tsv",
+        barcodes="data/processed/00_input/barcodes.tsv",
+        metadata="data/processed/03_batch/cell_metadata_with_guides.csv"
+    output:
+        scores="data/processed/03_mixscape/mixscape_scores.csv",
+        plots="data/processed/03_mixscape/mixscape_plots.pdf"
+    params:
+        reference=config["mixscape"]["reference"],
+        split_by=config["mixscape"]["split_by"],
+        neighbors=config["mixscape"]["num_neighbors"],
+        min_cells=config["mixscape"]["min_cells_per_target"],
+        min_de_genes=config["mixscape"]["min_de_genes"],
+        probability_threshold=config["mixscape"]["perturbed_probability_threshold"]
+    script:
+        "scripts/run_mixscape.R"
+
+
+rule design_gate:
+    input:
+        metadata="data/processed/03_batch/cell_metadata_with_guides.csv",
+        mixscape="data/processed/03_mixscape/mixscape_scores.csv",
+        config=RESOLVED_CONFIG
+    output:
+        diagnostics="data/processed/03_design_gate/confounding_diagnostics.csv",
+        decision="data/processed/03_design_gate/decision.json"
+    shell:
+        "python -m perturbseq_pipeline design-gate --config {input.config} "
+        "--metadata {input.metadata} --mixscape {input.mixscape} "
+        "--diagnostics {output.diagnostics} --decision {output.decision}"
+
+
+rule pseudobulk:
+    input:
+        adata="data/processed/00_input/analysis.h5ad",
+        metadata="data/processed/03_batch/cell_metadata_with_guides.csv",
+        gate="data/processed/03_design_gate/decision.json",
+        config=RESOLVED_CONFIG
+    output:
+        counts_out="data/processed/04_pseudobulk/pseudobulk_counts.csv",
+        design_out="data/processed/04_pseudobulk/design_matrix.csv"
+    shell:
+        "python -m perturbseq_pipeline pseudobulk --config {input.config} "
+        "--adata {input.adata} --metadata {input.metadata} --design-gate {input.gate} "
+        "--counts-out {output.counts_out} --design-out {output.design_out}"
+
+
+rule pseudobulk_ko_sensitivity:
+    input:
+        adata="data/processed/00_input/analysis.h5ad",
+        metadata="data/processed/03_batch/cell_metadata_with_guides.csv",
+        mixscape="data/processed/03_mixscape/mixscape_scores.csv",
+        gate="data/processed/03_design_gate/decision.json",
+        config=RESOLVED_CONFIG
+    output:
+        counts_out="data/processed/04_pseudobulk/ko_only_counts.csv",
+        design_out="data/processed/04_pseudobulk/ko_only_design_matrix.csv"
+    shell:
+        "python -m perturbseq_pipeline pseudobulk --config {input.config} "
+        "--adata {input.adata} --metadata {input.metadata} "
+        "--mixscape-scores {input.mixscape} --design-gate {input.gate} "
+        "--counts-out {output.counts_out} --design-out {output.design_out}"
+
+
+rule differential_expression:
+    input:
+        counts="data/processed/04_pseudobulk/pseudobulk_counts.csv",
+        design="data/processed/04_pseudobulk/design_matrix.csv"
+    output:
+        results="data/processed/05_de/de_results.csv",
+        plots="data/processed/05_de/de_plots.pdf",
+        summary="data/processed/05_de/contrast_summary.csv"
+    params:
+        reference=config["differential_expression"]["reference"],
+        covariates=",".join(config["differential_expression"]["covariates"]),
+        strata=",".join(config["differential_expression"]["strata"]),
+        min_replicates=config["differential_expression"]["min_replicates_per_group"]
+    script:
+        "scripts/run_edger.R"
+
+
+rule differential_expression_ko_sensitivity:
+    input:
+        counts="data/processed/04_pseudobulk/ko_only_counts.csv",
+        design="data/processed/04_pseudobulk/ko_only_design_matrix.csv"
+    output:
+        results="data/processed/05_de/ko_only_de_results.csv",
+        plots="data/processed/05_de/ko_only_de_plots.pdf",
+        summary="data/processed/05_de/ko_only_contrast_summary.csv"
+    params:
+        reference=config["differential_expression"]["reference"],
+        covariates=",".join(config["differential_expression"]["covariates"]),
+        strata=",".join(config["differential_expression"]["strata"]),
+        min_replicates=config["differential_expression"]["min_replicates_per_group"]
+    script:
+        "scripts/run_edger.R"
+
+
+rule pathway_visualization:
+    input:
+        de="data/processed/05_de/de_results.csv",
+        gmt=config["pathway_analysis"]["gene_sets"]
+    output:
+        pathway="data/processed/06_visualization/pathway_results.csv",
+        plots="data/processed/06_visualization/pathway_plots.pdf"
+    params:
+        min_size=config["pathway_analysis"]["min_size"],
+        max_size=config["pathway_analysis"]["max_size"],
+        random_seed=config["pathway_analysis"]["random_seed"]
+    script:
+        "scripts/run_fgsea.R"
+
+
+rule provenance:
+    input:
+        adata="data/processed/00_input/analysis.h5ad",
+        config=RESOLVED_CONFIG,
+        sources=configured_provenance_files
+    output:
+        manifest="results/provenance/run_metadata.json"
+    shell:
+        "python -m perturbseq_pipeline provenance --config {input.config} "
+        "--adata {input.adata} --output {output.manifest}"
+
+
+rule report:
+    input:
+        qc="data/processed/01_qc/qc_metrics.csv",
+        low_moi="data/processed/02_guides/low_moi_qc_summary.csv",
+        batch="data/processed/03_batch/batch_metrics.csv",
+        guide_batch_sample="data/processed/03_batch/guide_capture_by_sample.csv",
+        guide_batch_tests="data/processed/03_batch/guide_batch_tests.csv",
+        guide_batch_composition="data/processed/03_batch/guide_composition_by_batch.csv",
+        gate_diagnostics="data/processed/03_design_gate/confounding_diagnostics.csv",
+        gate_decision="data/processed/03_design_gate/decision.json",
+        mixscape="data/processed/03_mixscape/mixscape_scores.csv",
+        contrasts="data/processed/05_de/contrast_summary.csv",
+        de="data/processed/05_de/de_results.csv",
+        sensitivity_contrasts="data/processed/05_de/ko_only_contrast_summary.csv",
+        sensitivity_de="data/processed/05_de/ko_only_de_results.csv",
+        pathway="data/processed/06_visualization/pathway_results.csv",
+        config=RESOLVED_CONFIG
+    output:
+        html="results/final_reports/summary_dashboard.html"
+    shell:
+        "python -m perturbseq_pipeline report --config {input.config} --qc {input.qc} "
+        "--low-moi {input.low_moi} --batch {input.batch} "
+        "--guide-batch-sample {input.guide_batch_sample} "
+        "--guide-batch-tests {input.guide_batch_tests} "
+        "--guide-batch-composition {input.guide_batch_composition} "
+        "--gate-diagnostics {input.gate_diagnostics} --gate-decision {input.gate_decision} "
+        "--mixscape {input.mixscape} --contrasts {input.contrasts} --de {input.de} "
+        "--sensitivity-contrasts {input.sensitivity_contrasts} "
+        "--sensitivity-de {input.sensitivity_de} --pathway {input.pathway} "
+        "--output {output.html}"

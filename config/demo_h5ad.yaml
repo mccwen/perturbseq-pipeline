@@ -1,0 +1,4 @@
+input:
+  mode: "h5ad"
+  h5ad: "demo/perturbseq_feature_matrix.h5ad"
+  sample_design: "demo/sample_metadata.csv"

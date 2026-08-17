@@ -1,0 +1,6 @@
+input:
+  mode: "csv"
+  expression_counts: "demo/expression_counts.csv"
+  guide_counts: "demo/guide_counts.csv"
+  metadata: "demo/cell_metadata.csv"
+  sample_design: "demo/sample_metadata.csv"

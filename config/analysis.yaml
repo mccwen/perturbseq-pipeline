@@ -1,0 +1,75 @@
+project:
+  name: "low_moi_perturbseq"
+  organism: "human"
+  genome: "GRCh38"
+
+experiment:
+  perturbation_design: "low_moi_single_guide"
+  expected_moi: 0.30
+  primary_analysis_guide_class: "single"
+  include_non_targeting_controls: true
+
+cell_calling:
+  # Filtered Cell Ranger and prefiltered H5AD inputs retain their upstream cell calls.
+  # Use fixed_threshold only for explicitly pre-demultiplexed custom matrices.
+  method: "filtered_input"
+  min_counts: 100
+  min_genes: 50
+
+qc:
+  min_counts: 500
+  min_genes: 200
+  max_mito_fraction: 0.20
+  expected_doublet_rate: 0.06
+  doublet_score_threshold: null
+  highly_variable_genes: 3000
+
+guide_assignment:
+  reference: "demo/guides_reference.csv"
+  min_umi: 3
+  min_fraction: 0.60
+  max_observed_multiplet_fraction: 0.20
+
+batch:
+  covariates: ["donor", "batch", "condition"]
+  eligibility_column: "include_primary_analysis"
+
+guide_batch:
+  sample_column: "sample_id"
+  batch_column: "batch"
+  min_samples_per_batch: 2
+  fdr_threshold: 0.05
+  effect_size_threshold: 0.10
+
+design_gate:
+  batch_column: "batch"
+  confounders: ["donor", "assigned_guide", "target_gene", "escaped_perturbation"]
+  eligibility_column: "include_primary_analysis"
+
+mixscape:
+  reference: "NT"
+  split_by: "cell_type"
+  num_neighbors: 10
+  min_cells_per_target: 5
+  min_de_genes: 3
+  perturbed_probability_threshold: 0.70
+
+pseudobulk:
+  groupby: ["sample_id", "donor", "batch", "condition", "cell_type", "target_gene"]
+  min_cells_per_group: 3
+  eligibility_column: "include_primary_analysis"
+
+differential_expression:
+  reference: "NT"
+  covariates: ["donor", "batch", "condition"]
+  strata: ["cell_type"]
+  min_replicates_per_group: 2
+
+pathway_analysis:
+  gene_sets: "demo/pathways.gmt"
+  min_size: 10
+  max_size: 500
+  random_seed: 7
+
+reports:
+  top_n_genes: 25

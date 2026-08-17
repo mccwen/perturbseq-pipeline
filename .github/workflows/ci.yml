@@ -21,8 +21,26 @@ jobs:
         run: ruff check src tests
       - name: Test
         run: pytest -q
-      - name: Demo smoke test
+      - name: Validation fixture smoke test
         run: |
-          perturbseq-pipeline make-demo --outdir data/demo
-          test -s data/demo/expression_counts.csv
+          perturbseq-pipeline make-demo --outdir demo
+          test -s demo/expression_counts.csv
+          test -s demo/perturbseq_feature_matrix.h5ad
 
+  workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yml
+          cache-environment: true
+      - name: Install CRAN runtime packages
+        shell: bash -el {0}
+        run: Rscript workflow/scripts/install_r_packages.R
+      - name: Run complete validation workflow
+        shell: bash -el {0}
+        run: snakemake --snakefile workflow/Snakefile --configfile config/demo_h5ad.yaml --cores 2
+      - name: Verify final report
+        shell: bash -el {0}
+        run: test -s results/final_reports/summary_dashboard.html

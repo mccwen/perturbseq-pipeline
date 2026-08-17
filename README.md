@@ -1,85 +1,114 @@
-# perturbseq-pipeline
+# Post-Cell Ranger Low-MOI Perturb-seq Workflow
 
-Reproducible Perturb-seq / CROP-seq analysis pipeline from Cell Ranger outputs to biological insight.
+Configuration-driven analysis of low-MOI 10x Perturb-seq data from Cell Ranger or H5AD input through replicate-aware differential expression and pathway analysis.
 
-This repository is arranged as an interview-ready example for a Computational Scientist role focused on high-content perturbation screens, foundation-model-ready perturbation datasets, and collaborative pipeline development.
+## Analysis Overview
 
-## What This Pipeline Does
-
-1. **Cell QC and filtering**: load Cell Ranger matrices, compute QC metrics, flag doublets, optionally score ambient RNA, and save a filtered AnnData object.
-2. **Guide processing and assignment**: parse guide reads, count UMIs, match guide references, assign single-guide / multi-guide / non-targeting cells, and summarize guide confidence.
-3. **Batch diagnosis**: quantify donor, batch, condition, and guide confounding with PCA/UMAP summaries and recommended downstream handling.
-4. **Escaped perturbation diagnosis**: support Mixscape-style KO / NP / NT classification and perturbation score summaries.
-5. **Pseudobulk and differential expression**: aggregate by donor, condition, cell type, and guide; export edgeR-ready design matrices and contrasts.
-6. **Pathway and visualization outputs**: volcano plots, heatmaps, enrichment tables, and a compact HTML report.
-
-The defaults are intentionally conservative for large Perturb-seq/CROP-seq screens: preserve batch covariates for inference, aggregate to biological replicates before differential expression, and treat escaped perturbations as a first-class QC axis.
-
-## Repository Layout
-
-```text
-config/                  Analysis configuration and sample/guide metadata templates
-data/raw/                Cell Ranger inputs, FASTQs, and references
-data/processed/          Stepwise pipeline outputs
-docs/                    Architecture, reproducibility, methods, and glossary notes
-notebooks/               Optional exploratory notebooks
-scripts/                 R and utility scripts called by the workflow
-src/perturbseq_pipeline/ Python package for reusable pipeline logic
-tests/                   Unit tests for core data transformations
-workflow/                Snakemake workflow and modular rules
-results/final_reports/   Final summaries for collaborators or interview review
+```mermaid
+flowchart LR
+  A["Cell Ranger H5 / H5AD"] --> B["Sparse AnnData"]
+  B --> C["Cell QC + Scrublet"]
+  B --> D["Guide assignment"]
+  C --> E["Eligible guide singlets"]
+  D --> E
+  D --> F["Guide batch diagnostics"]
+  E --> G["Expression batch diagnostics"]
+  E --> H["Mixscape KO / NP / NT"]
+  F --> I["Identifiability gate"]
+  G --> I
+  H --> I
+  I -->|pass| J["Replicate pseudobulk"]
+  I -->|blocked| X["Stop inference"]
+  J --> K["edgeR QL tests"]
+  K --> L["fgsea + report"]
 ```
+
+The workflow:
+
+- accepts Cell Ranger `filtered_feature_bc_matrix.h5`, H5AD, multi-sample manifests, or validation CSVs;
+- computes cell QC and Scrublet doublet calls;
+- assigns guides under a low-MOI single-guide design;
+- diagnoses expression and guide-capture batch effects;
+- uses Mixscape to identify escaped/non-perturbed cells;
+- blocks downstream inference when batch is inseparable from donor, guide, target, or escape status;
+- aggregates biological replicates for edgeR and runs a KO-only sensitivity analysis;
+- performs fgsea pathway analysis and builds an HTML summary.
+
+Only QC-passing transcriptomic singlets with one confident guide enter target-level inference. Individual cells are subsamples; biological samples are the units of differential-expression analysis.
 
 ## Quick Start
 
 ```bash
-conda env create -f environment.yml
-conda activate perturbseq-pipeline
-python -m perturbseq_pipeline make-demo --outdir data/demo
-snakemake --snakefile workflow/Snakefile --configfile config/config.yaml --cores 4
+make setup
+make test
+make run
 ```
 
-For an HPC execution example:
+The bundled demo contains 12 samples crossing three donors, two batches, and two conditions. Its matched CSV and H5AD inputs exercise the same workflow.
+
+Useful commands:
 
 ```bash
-snakemake --snakefile workflow/Snakefile \
-  --configfile config/config.yaml \
-  --profile config/slurm
+make dryrun-h5ad   # validate the DAG
+make run            # run the H5AD demo (default)
+make run-h5ad       # explicit H5AD alias
+make run-csv       # run the matched CSV demo
+make clean         # remove generated outputs and caches
 ```
 
-## Typical Inputs
+Open `results/final_reports/summary_dashboard.html` after a completed run.
 
-- Cell Ranger filtered feature-barcode matrix directory or `.h5` matrix.
-- Guide capture matrix or guide assignment table.
-- `config/samples.csv`: sample, donor, batch, condition, and file paths.
-- `config/guides_reference.csv`: guide IDs, target genes, non-targeting flags, and expected constructs.
-- Optional `config/cell_annotations.yml`: curated cell-type labels or marker references.
+## Study Inputs
+
+Scientific settings live in `config/analysis.yaml`. A study-specific H5AD configuration can be minimal:
+
+```yaml
+input:
+  mode: h5ad
+  h5ad: ./data/input/perturbseq_feature_matrix.h5ad
+  metadata: ./data/input/cell_metadata.csv
+  sample_design: ./data/input/sample_metadata.csv
+```
+
+RNA and guide matrices must contain raw non-negative integer counts. Required cell metadata are `sample_id`, `donor`, `batch`, `condition`, and `cell_type`. Guide IDs must match `demo/guides_reference.csv` or a study-specific replacement.
+
+For multiple Cell Ranger or H5AD files, use manifest mode. The manifest requires `sample_id,input_path,input_format,donor,batch,condition`; provide `cell_type` or a per-cell `metadata_path`.
+
+Run a study configuration with:
+
+```bash
+make run INPUT_CONFIG=config/study.yaml
+```
+
+## Repository
+
+```text
+config/analysis.yaml      Scientific parameters
+config/demo_*.yaml        Demo input configurations
+demo/                     Matched inputs and reference files
+src/perturbseq_pipeline/  Python CLI and testable analysis modules
+workflow/Snakefile        Complete post-Cell Ranger DAG
+workflow/scripts/         Mixscape, edgeR, and fgsea implementations
+tests/                    Pytest unit tests
+environment.yml           Pinned Python and R environment
+METHODS.md                Methods, decision logic, and limitations
+```
 
 ## Key Outputs
 
-- `data/processed/01_qc/adata_qc.h5ad`
-- `data/processed/02_guides/adata_guides.h5ad`
-- `data/processed/03_batch/batch_recommendations.md`
-- `data/processed/03_mixscape/mixscape_scores.csv`
-- `data/processed/04_pseudobulk/pseudobulk_counts.csv`
-- `data/processed/05_de/de_results.csv`
-- `data/processed/06_visualization/pathway_results.csv`
-- `results/final_reports/summary_dashboard.html`
+```text
+data/processed/01_qc/qc_metrics.csv
+data/processed/02_guides/guide_assignments.csv
+data/processed/03_batch/guide_batch_tests.csv
+data/processed/03_mixscape/mixscape_scores.csv
+data/processed/03_design_gate/decision.json
+data/processed/04_pseudobulk/pseudobulk_counts.csv
+data/processed/05_de/de_results.csv
+data/processed/05_de/ko_only_de_results.csv
+data/processed/06_visualization/pathway_results.csv
+results/final_reports/summary_dashboard.html
+```
 
-## Design Choices
+Generated outputs and runtime caches are ignored by Git. Each run writes one portable manifest with input checksums, repository-relative paths, Git state, and software versions.
 
-- **Snakemake first** for inspectable, resumable, HPC-friendly workflow execution.
-- **Python package modules** for testable data wrangling and QC logic.
-- **R scripts** for edgeR/Mixscape-style methods that are common in genomics teams.
-- **Config-driven analysis** so new screens can be run without editing code.
-- **Audit-friendly outputs** at every step to make scientific decisions reviewable.
-
-## Interview Talking Points
-
-- How doublets, low-quality cells, and ambient RNA affect perturbation assignment.
-- Why pseudobulk inference is preferred over naive cell-level tests for many replicated screens.
-- How to detect and handle guide, donor, batch, and condition confounding.
-- How escaped perturbations change interpretation of KO screens.
-- How this repository could scale on SLURM or cloud batch execution.
-- How processed perturbation matrices can feed downstream foundation-model training.
-
+See [METHODS.md](METHODS.md) for method boundaries, the stop/go logic, and operational details.

@@ -1,7 +1,0 @@
-marker_genes:
-  epithelial: ["EPCAM", "KRT8", "KRT18"]
-  cycling: ["MKI67", "TOP2A", "PCNA"]
-  immune: ["PTPRC", "LST1", "CD3D"]
-
-default_cell_type: "unassigned"
-

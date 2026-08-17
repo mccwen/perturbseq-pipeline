@@ -1,0 +1,13 @@
+sample_id,donor,batch,condition,n_cells
+S01,D01,B1,vehicle,100
+S02,D01,B1,stimulated,100
+S03,D01,B2,vehicle,100
+S04,D01,B2,stimulated,100
+S05,D02,B1,vehicle,100
+S06,D02,B1,stimulated,100
+S07,D02,B2,vehicle,100
+S08,D02,B2,stimulated,100
+S09,D03,B1,vehicle,100
+S10,D03,B1,stimulated,100
+S11,D03,B2,vehicle,100
+S12,D03,B2,stimulated,100
