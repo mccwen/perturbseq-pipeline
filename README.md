@@ -5,7 +5,8 @@ Configuration-driven analysis of low-MOI 10x Perturb-seq data from Cell Ranger o
 ## Analysis Overview
 
 ```mermaid
-flowchart LR
+%%{init: {"themeVariables": {"fontSize": "18px"}, "flowchart": {"nodeSpacing": 35, "rankSpacing": 45}}}%%
+flowchart TB
   A["Cell Ranger H5 / H5AD"] --> B["Sparse AnnData"]
   B --> C["Cell QC + Scrublet"]
   B --> D["Guide assignment"]
@@ -60,7 +61,8 @@ Open `results/final_reports/summary_dashboard.html` after a completed run.
 
 ## Study Inputs
 
-Scientific settings live in `config/analysis.yaml`. A study-specific H5AD configuration can be minimal:
+Scientific settings live in `config/analysis.yaml`. For real data, create a study-specific input
+file, for example `config/study.yaml`:
 
 ```yaml
 input:
@@ -74,7 +76,7 @@ RNA and guide matrices must contain raw non-negative integer counts. Required ce
 
 For multiple Cell Ranger or H5AD files, use manifest mode. The manifest requires `sample_id,input_path,input_format,donor,batch,condition`; provide `cell_type` or a per-cell `metadata_path`.
 
-Run a study configuration with:
+Run the input configuration you created with:
 
 ```bash
 make run INPUT_CONFIG=config/study.yaml
